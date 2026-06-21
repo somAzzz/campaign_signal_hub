@@ -75,12 +75,22 @@ class CommentChunk:
     metadata: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class ExtractionPlan:
+    chunk_comments: int
+    max_chunks: int
+    min_comments_for_chunking: int
+    max_comment_signals: int
+
+
 def extract_signals(
     campaign_id: str,
     dataset_id: str | None = None,
     scope: dict | None = None,
     analysis_mode: str = "full",
+    plan: dict | None = None,
 ) -> list[CampaignSignal]:
+    extraction_plan = _resolve_extraction_plan(plan)
     repo.clear_campaign_signals(campaign_id)
     records = repo.campaign_records(campaign_id)
     briefs = [record for record in records if isinstance(record, BriefDocument)]
@@ -99,6 +109,7 @@ def extract_signals(
         dataset_id=dataset_id,
         scope=scope,
         analysis_mode=analysis_mode,
+        plan=extraction_plan,
     )
     if not signals:
         signals = _extract_comment_signals(campaign_id, comments)
@@ -127,11 +138,18 @@ def _extract_llm_comment_signals(
     dataset_id: str | None = None,
     scope: dict | None = None,
     analysis_mode: str = "full",
+    plan: ExtractionPlan | None = None,
 ) -> list[CampaignSignal]:
     if not comments:
         return []
 
-    chunks = _plan_comment_chunks(comments, products, analysis_mode=analysis_mode)
+    plan = plan or _resolve_extraction_plan(None)
+    chunks = _plan_comment_chunks(
+        comments,
+        products,
+        analysis_mode=analysis_mode,
+        plan=plan,
+    )
     client = get_llm_client()
     signals: list[CampaignSignal] = []
     for chunk in chunks:
@@ -148,10 +166,11 @@ def _extract_llm_comment_signals(
                 dataset_id=dataset_id,
                 scope=scope,
                 analysis_mode=analysis_mode,
+                plan=plan,
             )
         )
 
-    return _merge_similar_signals(signals, comments)[: settings.llm_max_comment_signals]
+    return _merge_similar_signals(signals, comments)[: plan.max_comment_signals]
 
 
 def _extract_llm_chunk_signals(
@@ -166,6 +185,7 @@ def _extract_llm_chunk_signals(
     dataset_id: str | None,
     scope: dict | None,
     analysis_mode: str,
+    plan: ExtractionPlan,
 ) -> list[CampaignSignal]:
     selected_comments = chunk.comments
     prompt = _build_signal_prompt(
@@ -207,6 +227,7 @@ def _extract_llm_chunk_signals(
                 selected_comments=selected_comments,
                 chunk=chunk,
                 analysis_mode=analysis_mode,
+                plan=plan,
             ),
         )
         return signals
@@ -231,6 +252,7 @@ def _extract_llm_chunk_signals(
                 selected_comments=selected_comments,
                 chunk=chunk,
                 analysis_mode=analysis_mode,
+                plan=plan,
             ),
         )
         repo.add_quality_event(
@@ -341,9 +363,11 @@ def _input_summary(
     selected_comments: list[CommunityComment],
     chunk: CommentChunk | None = None,
     analysis_mode: str = "full",
+    plan: ExtractionPlan | None = None,
 ) -> dict:
     summary = {
         "analysis_mode": analysis_mode,
+        "extraction_plan": _plan_metadata(plan or _resolve_extraction_plan(None)),
         "brief_count": len(briefs),
         "comment_count": len(comments),
         "product_count": len(products),
@@ -429,16 +453,41 @@ def _active_endpoint() -> str | None:
     return None
 
 
+def _resolve_extraction_plan(payload: dict | None) -> ExtractionPlan:
+    payload = payload or {}
+    return ExtractionPlan(
+        chunk_comments=int(
+            payload.get("chunk_comments") or settings.llm_chunk_comments
+        ),
+        max_chunks=int(payload.get("max_chunks") or settings.llm_max_chunks),
+        min_comments_for_chunking=int(
+            payload.get("min_comments_for_chunking")
+            or settings.llm_min_comments_for_chunking
+        ),
+        max_comment_signals=int(
+            payload.get("max_comment_signals") or settings.llm_max_comment_signals
+        ),
+    )
+
+
+def _plan_metadata(plan: ExtractionPlan) -> dict:
+    return {
+        "chunk_comments": plan.chunk_comments,
+        "max_chunks": plan.max_chunks,
+        "min_comments_for_chunking": plan.min_comments_for_chunking,
+        "max_comment_signals": plan.max_comment_signals,
+    }
+
+
 def _plan_comment_chunks(
     comments: list[CommunityComment],
     products: list[ProductContext],
     analysis_mode: str = "full",
+    plan: ExtractionPlan | None = None,
 ) -> list[CommentChunk]:
-    if (
-        analysis_mode == "sample"
-        or len(comments) < settings.llm_min_comments_for_chunking
-    ):
-        selected = _select_comments_for_llm(comments, settings.llm_batch_comments)
+    plan = plan or _resolve_extraction_plan(None)
+    if analysis_mode == "sample" or len(comments) < plan.min_comments_for_chunking:
+        selected = _select_comments_for_llm(comments, plan.chunk_comments)
         return [
             _make_chunk(
                 chunk_id="balanced_sample",
@@ -453,13 +502,16 @@ def _plan_comment_chunks(
         ]
 
     chunks: list[CommentChunk] = []
-    chunks.extend(_topic_chunks(comments))
-    chunks.extend(_product_risk_chunks(comments, products))
-    chunks.extend(_rating_chunks(comments))
-    return _dedupe_chunks(chunks)[: settings.llm_max_chunks]
+    chunks.extend(_topic_chunks(comments, plan))
+    chunks.extend(_product_risk_chunks(comments, products, plan))
+    chunks.extend(_rating_chunks(comments, plan))
+    return _dedupe_chunks(chunks)[: plan.max_chunks]
 
 
-def _topic_chunks(comments: list[CommunityComment]) -> list[CommentChunk]:
+def _topic_chunks(
+    comments: list[CommunityComment],
+    plan: ExtractionPlan,
+) -> list[CommentChunk]:
     chunks: list[CommentChunk] = []
     for cluster in cluster_comments(comments):
         definition = TOPIC_DEFINITIONS.get(cluster.id)
@@ -472,7 +524,7 @@ def _topic_chunks(comments: list[CommunityComment]) -> list[CommentChunk]:
         ]
         if len(hits) < 3:
             continue
-        selected = _select_representative_comments(hits, settings.llm_chunk_comments)
+        selected = _select_representative_comments(hits, plan.chunk_comments)
         chunks.append(
             _make_chunk(
                 chunk_id=f"topic_{cluster.id}",
@@ -489,6 +541,7 @@ def _topic_chunks(comments: list[CommunityComment]) -> list[CommentChunk]:
 def _product_risk_chunks(
     comments: list[CommunityComment],
     products: list[ProductContext],
+    plan: ExtractionPlan,
 ) -> list[CommentChunk]:
     product_map = {product.parent_asin: product for product in products}
     grouped: dict[str, list[CommunityComment]] = defaultdict(list)
@@ -512,7 +565,7 @@ def _product_risk_chunks(
         product = product_map.get(parent_asin)
         selected = _select_representative_comments(
             product_comments,
-            settings.llm_chunk_comments,
+            plan.chunk_comments,
         )
         chunks.append(
             _make_chunk(
@@ -531,7 +584,10 @@ def _product_risk_chunks(
     return chunks
 
 
-def _rating_chunks(comments: list[CommunityComment]) -> list[CommentChunk]:
+def _rating_chunks(
+    comments: list[CommunityComment],
+    plan: ExtractionPlan,
+) -> list[CommentChunk]:
     low_rating = [
         comment
         for comment in comments
@@ -554,7 +610,7 @@ def _rating_chunks(comments: list[CommunityComment]) -> list[CommentChunk]:
                 ),
                 chunk_type="rating_low",
                 comments=_select_representative_comments(
-                    low_rating, settings.llm_chunk_comments
+                    low_rating, plan.chunk_comments
                 ),
                 source_comments=low_rating,
             )
@@ -569,9 +625,7 @@ def _rating_chunks(comments: list[CommunityComment]) -> list[CommentChunk]:
                     "and creator hooks."
                 ),
                 chunk_type="rating_positive",
-                comments=_select_representative_comments(
-                    positive, settings.llm_chunk_comments
-                ),
+                comments=_select_representative_comments(positive, plan.chunk_comments),
                 source_comments=positive,
             )
         )

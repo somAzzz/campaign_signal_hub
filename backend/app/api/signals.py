@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.signal import CampaignSignal, SignalUpdate
 from app.services.analysis import DatasetScope, build_scope_filter
@@ -11,10 +11,18 @@ from app.services.signal_extractor import extract_signals
 router = APIRouter()
 
 
+class ExtractionPlanRequest(BaseModel):
+    chunk_comments: int | None = Field(default=None, ge=4, le=80)
+    max_chunks: int | None = Field(default=None, ge=1, le=30)
+    min_comments_for_chunking: int | None = Field(default=None, ge=20, le=5000)
+    max_comment_signals: int | None = Field(default=None, ge=4, le=80)
+
+
 class ExtractionRequest(BaseModel):
     dataset_id: str | None = None
     scope: DatasetScope | None = None
     analysis_mode: str = "full"
+    plan: ExtractionPlanRequest | None = None
 
 
 @router.post(
@@ -35,11 +43,15 @@ def run_extraction(
             )
         except KeyError as exc:
             raise HTTPException(status_code=400, detail="Unknown dataset_id") from exc
+    plan = (
+        payload.plan.model_dump(exclude_none=True) if payload and payload.plan else None
+    )
     signals = extract_signals(
         campaign_id,
         dataset_id=payload.dataset_id if payload else None,
         scope=payload.scope.model_dump() if payload and payload.scope else None,
         analysis_mode=payload.analysis_mode if payload else "full",
+        plan=plan,
     )
     save_snapshot()
     return signals

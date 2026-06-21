@@ -97,6 +97,13 @@ export interface DatasetScopeOption {
   count: number;
 }
 
+export interface ExtractionPlan {
+  chunk_comments: number;
+  max_chunks: number;
+  min_comments_for_chunking: number;
+  max_comment_signals: number;
+}
+
 export interface DatasetProfile {
   dataset_id: string;
   row_count: number;

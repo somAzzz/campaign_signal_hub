@@ -3,6 +3,7 @@ import type {
   CampaignSignal,
   DatasetProfile,
   DatasetOption,
+  ExtractionPlan,
   ExportSummary,
   ProductHealth,
   SourceRecord,
@@ -42,6 +43,7 @@ export function extractSignals(
   datasetId?: string,
   scope?: { mode: string; value?: string },
   analysisMode = "full",
+  plan?: ExtractionPlan,
 ) {
   return request<CampaignSignal[]>(`/api/campaigns/${campaignId}/extract-signals`, {
     method: "POST",
@@ -49,6 +51,7 @@ export function extractSignals(
       dataset_id: datasetId,
       scope,
       analysis_mode: analysisMode,
+      plan,
     }),
   });
 }

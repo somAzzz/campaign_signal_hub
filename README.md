@@ -113,6 +113,19 @@ count, affected products, rating skew, helpful votes, evidence count, and source
 chunk count. This is what lets a 50,000-review run produce broader, more
 defensible business signals than a 5,000-review run.
 
+The Dataset workspace also exposes the extraction plan. Three presets are
+available:
+
+| Preset | Reviews/chunk | Max chunks | Chunk threshold | Max signals |
+| --- | ---: | ---: | ---: | ---: |
+| Balanced | 18 | 10 | 200 | 24 |
+| Broad | 14 | 16 | 120 | 36 |
+| Deep | 24 | 8 | 300 | 20 |
+
+Custom mode lets the user set all four values before running extraction. The
+same values are sent to the backend with the extraction request and recorded in
+each LLM run under `input_summary.extraction_plan`.
+
 ## LLM Runtime
 
 The backend defaults to a local sglang OpenAI-compatible server:

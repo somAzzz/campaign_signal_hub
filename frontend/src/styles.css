@@ -436,6 +436,65 @@ meter::-webkit-meter-optimum-value {
   border-color: rgba(199, 131, 61, 0.54);
 }
 
+.analysis-plan-panel .block-heading {
+  margin-bottom: 12px;
+}
+
+.plan-presets {
+  background: rgba(255, 253, 247, 0.72);
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 4px;
+}
+
+.plan-presets button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.plan-presets button.selected {
+  background: var(--espresso);
+  color: var(--paper);
+}
+
+.plan-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.number-field {
+  background: rgba(54, 95, 99, 0.06);
+  border: 1px solid rgba(54, 95, 99, 0.14);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.number-field span {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.number-field input {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font: inherit;
+  min-height: 34px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
 .preview-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }

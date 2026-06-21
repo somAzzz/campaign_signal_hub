@@ -15,6 +15,7 @@ import {
   PackageCheck,
   RefreshCcw,
   ShieldAlert,
+  SlidersHorizontal,
   Sparkles,
   X,
 } from "lucide-react";
@@ -40,6 +41,7 @@ import type {
   DatasetOption,
   DatasetScopeOption,
   ExportSummary,
+  ExtractionPlan,
   ProductHealth,
   SourceRecord,
   SignalType,
@@ -66,6 +68,40 @@ const filters: Array<"all" | SignalType> = [
 
 type ActiveView = "dataset" | "signals" | "health" | "products" | "risks";
 type AnalysisMode = "sample" | "full";
+type PlanPreset = "balanced" | "broad" | "deep" | "custom";
+
+const extractionPlanPresets: Record<
+  Exclude<PlanPreset, "custom">,
+  { label: string; plan: ExtractionPlan }
+> = {
+  balanced: {
+    label: "Balanced",
+    plan: {
+      chunk_comments: 18,
+      max_chunks: 10,
+      min_comments_for_chunking: 200,
+      max_comment_signals: 24,
+    },
+  },
+  broad: {
+    label: "Broad",
+    plan: {
+      chunk_comments: 14,
+      max_chunks: 16,
+      min_comments_for_chunking: 120,
+      max_comment_signals: 36,
+    },
+  },
+  deep: {
+    label: "Deep",
+    plan: {
+      chunk_comments: 24,
+      max_chunks: 8,
+      min_comments_for_chunking: 300,
+      max_comment_signals: 20,
+    },
+  },
+};
 
 export function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -79,6 +115,11 @@ export function App() {
   const [selectedScope, setSelectedScope] = useState<DatasetScopeOption | null>(null);
   const [selectedAnalysisMode, setSelectedAnalysisMode] =
     useState<AnalysisMode>("full");
+  const [selectedPlanPreset, setSelectedPlanPreset] =
+    useState<PlanPreset>("balanced");
+  const [extractionPlan, setExtractionPlan] = useState<ExtractionPlan>(
+    extractionPlanPresets.balanced.plan,
+  );
   const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>("dataset");
@@ -186,6 +227,21 @@ export function App() {
     }
   }
 
+  function selectPlanPreset(preset: PlanPreset) {
+    setSelectedPlanPreset(preset);
+    if (preset !== "custom") {
+      setExtractionPlan(extractionPlanPresets[preset].plan);
+    }
+  }
+
+  function updateExtractionPlan(key: keyof ExtractionPlan, value: number) {
+    setSelectedPlanPreset("custom");
+    setExtractionPlan((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
   async function rerunExtraction() {
     if (!campaign) return;
     try {
@@ -206,6 +262,7 @@ export function App() {
           value: selectedScope?.value,
         },
         selectedAnalysisMode,
+        extractionPlan,
       );
       const [recordResult, summary, topicResult, productResult] = await Promise.all([
         listRecords(campaign.id),
@@ -468,6 +525,10 @@ export function App() {
             topics={topics}
             selectedScope={selectedScope}
             onSelectScope={setSelectedScope}
+            selectedPlanPreset={selectedPlanPreset}
+            extractionPlan={extractionPlan}
+            onSelectPlanPreset={selectPlanPreset}
+            onUpdateExtractionPlan={updateExtractionPlan}
           />
         ) : activeView === "health" ? (
           <CampaignHealth
@@ -672,11 +733,19 @@ function DatasetWorkspace({
   topics,
   selectedScope,
   onSelectScope,
+  selectedPlanPreset,
+  extractionPlan,
+  onSelectPlanPreset,
+  onUpdateExtractionPlan,
 }: {
   profile: DatasetProfile | null;
   topics: TopicCluster[];
   selectedScope: DatasetScopeOption | null;
   onSelectScope: (scope: DatasetScopeOption) => void;
+  selectedPlanPreset: PlanPreset;
+  extractionPlan: ExtractionPlan;
+  onSelectPlanPreset: (preset: PlanPreset) => void;
+  onUpdateExtractionPlan: (key: keyof ExtractionPlan, value: number) => void;
 }) {
   if (!profile) {
     return <section className="health-panel workspace-panel">Loading dataset...</section>;
@@ -726,6 +795,75 @@ function DatasetWorkspace({
               <strong>{scope.count}</strong>
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="health-panel analysis-plan-panel">
+        <div className="block-heading">
+          <SlidersHorizontal aria-hidden="true" />
+          <div>
+            <p className="eyebrow">Analysis plan</p>
+            <h2>Set extraction depth</h2>
+          </div>
+        </div>
+        <div className="plan-presets" role="group" aria-label="Extraction presets">
+          {(
+            Object.entries(extractionPlanPresets) as Array<
+              [Exclude<PlanPreset, "custom">, { label: string; plan: ExtractionPlan }]
+            >
+          ).map(([key, preset]) => (
+            <button
+              key={key}
+              className={selectedPlanPreset === key ? "selected" : ""}
+              type="button"
+              aria-pressed={selectedPlanPreset === key}
+              onClick={() => onSelectPlanPreset(key)}
+            >
+              {preset.label}
+            </button>
+          ))}
+          <button
+            className={selectedPlanPreset === "custom" ? "selected" : ""}
+            type="button"
+            aria-pressed={selectedPlanPreset === "custom"}
+            onClick={() => onSelectPlanPreset("custom")}
+          >
+            Custom
+          </button>
+        </div>
+        <div className="plan-fields">
+          <NumberField
+            label="Reviews/chunk"
+            value={extractionPlan.chunk_comments}
+            min={4}
+            max={80}
+            onChange={(value) => onUpdateExtractionPlan("chunk_comments", value)}
+          />
+          <NumberField
+            label="Max chunks"
+            value={extractionPlan.max_chunks}
+            min={1}
+            max={30}
+            onChange={(value) => onUpdateExtractionPlan("max_chunks", value)}
+          />
+          <NumberField
+            label="Chunk threshold"
+            value={extractionPlan.min_comments_for_chunking}
+            min={20}
+            max={5000}
+            onChange={(value) =>
+              onUpdateExtractionPlan("min_comments_for_chunking", value)
+            }
+          />
+          <NumberField
+            label="Max signals"
+            value={extractionPlan.max_comment_signals}
+            min={4}
+            max={80}
+            onChange={(value) =>
+              onUpdateExtractionPlan("max_comment_signals", value)
+            }
+          />
         </div>
       </div>
 
@@ -870,6 +1008,38 @@ function HealthStat({ label, value }: { label: string; value: number }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="number-field">
+      <span>{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(event) => {
+          const next = Number(event.target.value);
+          if (Number.isFinite(next)) {
+            onChange(Math.min(max, Math.max(min, next)));
+          }
+        }}
+      />
+    </label>
   );
 }
 
