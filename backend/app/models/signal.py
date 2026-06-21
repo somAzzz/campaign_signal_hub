@@ -61,6 +61,7 @@ class LLMExtractionRun(BaseModel):
     endpoint: str | None = None
     status: str = "succeeded"
     dataset_id: str | None = None
+    dataset: dict | None = None
     scope: dict | None = None
     source_files: list[dict] = Field(default_factory=list)
     input_summary: dict = Field(default_factory=dict)

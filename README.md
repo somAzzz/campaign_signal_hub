@@ -127,7 +127,9 @@ data/processed/llm_outputs/
 Each run file includes audit metadata: start/end time, duration, status,
 provider, model, endpoint, selected dataset and scope, source files, record
 counts, selected source record IDs, request metadata, response usage, parsed
-signal count, and any error that caused fallback.
+signal count, and any error that caused fallback. The processed sample is
+available in the top-level `dataset` object, while all ingested files for the
+campaign are listed in `source_files`.
 
 They can also be inspected through:
 

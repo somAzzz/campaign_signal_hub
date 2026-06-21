@@ -20,6 +20,7 @@ from app.models.source import (
     SourceRecord,
 )
 from app.services.analysis import cluster_comments
+from app.services.datasets import get_comment_dataset
 from app.services.llm_client import LLMCompletionResult, get_llm_client
 from app.services.quality_checks import validate_signal
 from app.services.repository import repo
@@ -198,6 +199,7 @@ def _store_llm_output(
         endpoint=result.endpoint,
         status="succeeded",
         dataset_id=dataset_id,
+        dataset=_dataset_metadata(dataset_id, len(selected_comments), input_summary),
         scope=scope,
         source_files=_source_file_metadata(campaign_id),
         input_summary=input_summary,
@@ -235,6 +237,7 @@ def _store_failed_llm_output(
         endpoint=result.endpoint if result else _active_endpoint(),
         status="failed",
         dataset_id=dataset_id,
+        dataset=_dataset_metadata(dataset_id, len(selected_comments), input_summary),
         scope=scope,
         source_files=_source_file_metadata(campaign_id),
         input_summary=input_summary,
@@ -304,6 +307,29 @@ def _source_file_metadata(campaign_id: str) -> list[dict]:
         }
         for source_file in repo.campaign_files(campaign_id)
     ]
+
+
+def _dataset_metadata(
+    dataset_id: str | None,
+    selected_comment_count: int,
+    input_summary: dict,
+) -> dict | None:
+    if dataset_id is None:
+        return None
+    try:
+        dataset = get_comment_dataset(dataset_id)
+    except KeyError:
+        return {"id": dataset_id, "selected_comment_count": selected_comment_count}
+    return {
+        "id": dataset.id,
+        "label": dataset.label,
+        "filename": dataset.filename,
+        "path": dataset.path,
+        "catalog_record_count": dataset.record_count,
+        "loaded_comment_count": input_summary.get("comment_count"),
+        "selected_comment_count": selected_comment_count,
+        "description": dataset.description,
+    }
 
 
 def _duration_ms(started_at: datetime, ended_at: datetime) -> int:

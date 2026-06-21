@@ -51,6 +51,21 @@ def list_comment_datasets() -> list[DatasetOption]:
     return datasets
 
 
+def get_comment_dataset(dataset_id: str) -> DatasetOption:
+    if dataset_id not in DATASET_CATALOG:
+        raise KeyError(dataset_id)
+    config = DATASET_CATALOG[dataset_id]
+    path = SAMPLE_DIR / config["filename"]
+    return DatasetOption(
+        id=dataset_id,
+        label=config["label"],
+        filename=config["filename"],
+        path=str(path),
+        record_count=_count_csv_records(path),
+        description=config["description"],
+    )
+
+
 def load_comment_dataset(
     campaign_id: str,
     dataset_id: str,
