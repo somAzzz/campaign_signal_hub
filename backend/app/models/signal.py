@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
 
@@ -73,7 +73,7 @@ class LLMExtractionRun(BaseModel):
     parsed_signal_count: int = 0
     error: str | None = None
     output_path: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     ended_at: datetime | None = None
     duration_ms: int | None = None
