@@ -65,6 +65,7 @@ const filters: Array<"all" | SignalType> = [
 ];
 
 type ActiveView = "dataset" | "signals" | "health" | "products" | "risks";
+type AnalysisMode = "sample" | "full";
 
 export function App() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -76,6 +77,8 @@ export function App() {
   const [productHealth, setProductHealth] = useState<ProductHealth[]>([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState("coffee_50");
   const [selectedScope, setSelectedScope] = useState<DatasetScopeOption | null>(null);
+  const [selectedAnalysisMode, setSelectedAnalysisMode] =
+    useState<AnalysisMode>("full");
   const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>("dataset");
@@ -189,14 +192,21 @@ export function App() {
       setExtracting(true);
       const dataset = datasets.find((item) => item.id === selectedDatasetId);
       setNotice(
-        `Running local sglang extraction on ${dataset?.label ?? "selected data"} / ${
+        `Running ${
+          selectedAnalysisMode === "full" ? "full chunked" : "fast sample"
+        } extraction on ${dataset?.label ?? "selected data"} / ${
           selectedScope?.label ?? "all products"
         }...`,
       );
-      const signalList = await extractSignals(campaign.id, selectedDatasetId, {
-        mode: selectedScope?.mode ?? "all",
-        value: selectedScope?.value,
-      });
+      const signalList = await extractSignals(
+        campaign.id,
+        selectedDatasetId,
+        {
+          mode: selectedScope?.mode ?? "all",
+          value: selectedScope?.value,
+        },
+        selectedAnalysisMode,
+      );
       const [recordResult, summary, topicResult, productResult] = await Promise.all([
         listRecords(campaign.id),
         getExport(campaign.id),
@@ -212,7 +222,7 @@ export function App() {
       setNotice(
         `Extraction finished: ${signalList.length} signals generated from ${
           dataset?.label ?? selectedDatasetId
-        }.`,
+        } with ${selectedAnalysisMode === "full" ? "full chunking" : "fast sampling"}.`,
       );
       setError(null);
     } catch (err) {
@@ -387,6 +397,19 @@ export function App() {
                     </option>
                   ),
                 )}
+              </select>
+            </label>
+            <label className="dataset-picker mode-picker">
+              <span>Mode</span>
+              <select
+                value={selectedAnalysisMode}
+                onChange={(event) =>
+                  setSelectedAnalysisMode(event.target.value as AnalysisMode)
+                }
+                disabled={extracting}
+              >
+                <option value="full">Full chunks</option>
+                <option value="sample">Fast sample</option>
               </select>
             </label>
             <button

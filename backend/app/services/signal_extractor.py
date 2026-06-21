@@ -79,6 +79,7 @@ def extract_signals(
     campaign_id: str,
     dataset_id: str | None = None,
     scope: dict | None = None,
+    analysis_mode: str = "full",
 ) -> list[CampaignSignal]:
     repo.clear_campaign_signals(campaign_id)
     records = repo.campaign_records(campaign_id)
@@ -97,6 +98,7 @@ def extract_signals(
         metrics,
         dataset_id=dataset_id,
         scope=scope,
+        analysis_mode=analysis_mode,
     )
     if not signals:
         signals = _extract_comment_signals(campaign_id, comments)
@@ -124,11 +126,12 @@ def _extract_llm_comment_signals(
     metrics: list[PerformanceMetric],
     dataset_id: str | None = None,
     scope: dict | None = None,
+    analysis_mode: str = "full",
 ) -> list[CampaignSignal]:
     if not comments:
         return []
 
-    chunks = _plan_comment_chunks(comments, products)
+    chunks = _plan_comment_chunks(comments, products, analysis_mode=analysis_mode)
     client = get_llm_client()
     signals: list[CampaignSignal] = []
     for chunk in chunks:
@@ -144,6 +147,7 @@ def _extract_llm_comment_signals(
                 chunk=chunk,
                 dataset_id=dataset_id,
                 scope=scope,
+                analysis_mode=analysis_mode,
             )
         )
 
@@ -161,6 +165,7 @@ def _extract_llm_chunk_signals(
     chunk: CommentChunk,
     dataset_id: str | None,
     scope: dict | None,
+    analysis_mode: str,
 ) -> list[CampaignSignal]:
     selected_comments = chunk.comments
     prompt = _build_signal_prompt(
@@ -201,6 +206,7 @@ def _extract_llm_chunk_signals(
                 metrics=metrics,
                 selected_comments=selected_comments,
                 chunk=chunk,
+                analysis_mode=analysis_mode,
             ),
         )
         return signals
@@ -224,6 +230,7 @@ def _extract_llm_chunk_signals(
                 metrics=metrics,
                 selected_comments=selected_comments,
                 chunk=chunk,
+                analysis_mode=analysis_mode,
             ),
         )
         repo.add_quality_event(
@@ -333,8 +340,10 @@ def _input_summary(
     metrics: list[PerformanceMetric],
     selected_comments: list[CommunityComment],
     chunk: CommentChunk | None = None,
+    analysis_mode: str = "full",
 ) -> dict:
     summary = {
+        "analysis_mode": analysis_mode,
         "brief_count": len(briefs),
         "comment_count": len(comments),
         "product_count": len(products),
@@ -423,14 +432,20 @@ def _active_endpoint() -> str | None:
 def _plan_comment_chunks(
     comments: list[CommunityComment],
     products: list[ProductContext],
+    analysis_mode: str = "full",
 ) -> list[CommentChunk]:
-    if len(comments) < settings.llm_min_comments_for_chunking:
+    if (
+        analysis_mode == "sample"
+        or len(comments) < settings.llm_min_comments_for_chunking
+    ):
         selected = _select_comments_for_llm(comments, settings.llm_batch_comments)
         return [
             _make_chunk(
                 chunk_id="balanced_sample",
                 label="Balanced review sample",
-                description="Balanced low, mixed, and high-rating review sample.",
+                description=(
+                    "Fast balanced low, mixed, and high-rating review sample."
+                ),
                 chunk_type="balanced_sample",
                 comments=selected,
                 source_comments=comments,

@@ -41,10 +41,15 @@ export function extractSignals(
   campaignId: string,
   datasetId?: string,
   scope?: { mode: string; value?: string },
+  analysisMode = "full",
 ) {
   return request<CampaignSignal[]>(`/api/campaigns/${campaignId}/extract-signals`, {
     method: "POST",
-    body: JSON.stringify({ dataset_id: datasetId, scope }),
+    body: JSON.stringify({
+      dataset_id: datasetId,
+      scope,
+      analysis_mode: analysisMode,
+    }),
   });
 }
 

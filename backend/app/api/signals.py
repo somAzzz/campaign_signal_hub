@@ -14,6 +14,7 @@ router = APIRouter()
 class ExtractionRequest(BaseModel):
     dataset_id: str | None = None
     scope: DatasetScope | None = None
+    analysis_mode: str = "full"
 
 
 @router.post(
@@ -38,6 +39,7 @@ def run_extraction(
         campaign_id,
         dataset_id=payload.dataset_id if payload else None,
         scope=payload.scope.model_dump() if payload and payload.scope else None,
+        analysis_mode=payload.analysis_mode if payload else "full",
     )
     save_snapshot()
     return signals

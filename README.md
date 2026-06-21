@@ -92,9 +92,13 @@ are stored separately for debugging and audit.
 
 ## Analysis Engine
 
-Small samples are analyzed as one balanced review slice. Larger samples are not
-sent to the model as one prompt. The backend first scans the full loaded sample
-and creates analysis chunks:
+The frontend lets the analyst choose an extraction mode before running:
+
+- `Fast sample` analyzes one balanced slice of reviews. Use it for prompt
+  checks, UI testing, and quick smoke tests.
+- `Full chunks` is the default business-analysis path. Larger samples are not
+  sent to the model as one prompt. The backend first scans the full loaded
+  sample and creates analysis chunks:
 
 - topic chunks such as weak flavor, bitterness, freshness, machine fit, and
   price/value
