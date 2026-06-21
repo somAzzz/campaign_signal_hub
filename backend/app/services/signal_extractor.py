@@ -1,5 +1,6 @@
 import json
 from collections import Counter
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.config import settings
@@ -19,7 +20,7 @@ from app.models.source import (
     SourceRecord,
 )
 from app.services.analysis import cluster_comments
-from app.services.llm_client import get_llm_client
+from app.services.llm_client import LLMCompletionResult, get_llm_client
 from app.services.quality_checks import validate_signal
 from app.services.repository import repo
 
@@ -58,7 +59,11 @@ POSITIVE_TERMS = {
 }
 
 
-def extract_signals(campaign_id: str) -> list[CampaignSignal]:
+def extract_signals(
+    campaign_id: str,
+    dataset_id: str | None = None,
+    scope: dict | None = None,
+) -> list[CampaignSignal]:
     repo.clear_campaign_signals(campaign_id)
     records = repo.campaign_records(campaign_id)
     briefs = [record for record in records if isinstance(record, BriefDocument)]
@@ -67,7 +72,16 @@ def extract_signals(campaign_id: str) -> list[CampaignSignal]:
     creators = [record for record in records if isinstance(record, CreatorProfile)]
     metrics = [record for record in records if isinstance(record, PerformanceMetric)]
 
-    signals = _extract_llm_comment_signals(campaign_id, briefs, comments, products)
+    signals = _extract_llm_comment_signals(
+        campaign_id,
+        briefs,
+        comments,
+        products,
+        creators,
+        metrics,
+        dataset_id=dataset_id,
+        scope=scope,
+    )
     if not signals:
         signals = _extract_comment_signals(campaign_id, comments)
     signals.extend(_extract_creator_signals(campaign_id, creators))
@@ -90,24 +104,70 @@ def _extract_llm_comment_signals(
     briefs: list[BriefDocument],
     comments: list[CommunityComment],
     products: list[ProductContext],
+    creators: list[CreatorProfile],
+    metrics: list[PerformanceMetric],
+    dataset_id: str | None = None,
+    scope: dict | None = None,
 ) -> list[CampaignSignal]:
     if not comments:
         return []
 
+    selected_comments = _select_comments_for_llm(comments, settings.llm_batch_comments)
     prompt = _build_signal_prompt(
         campaign_id,
         briefs,
-        _select_comments_for_llm(comments, settings.llm_batch_comments),
+        selected_comments,
         products,
     )
+    started_at = datetime.now(UTC)
+    result: LLMCompletionResult | None = None
     try:
-        payload = get_llm_client().complete_json(prompt)
-        run = _store_llm_output(campaign_id, prompt, payload, 0)
+        client = get_llm_client()
+        result = client.complete_json(prompt)
+        ended_at = datetime.now(UTC)
+        payload = result.parsed_json
         signals = _signals_from_llm_payload(campaign_id, payload, comments)
-        run.parsed_signal_count = len(signals)
-        _write_llm_run(run)
+        _store_llm_output(
+            campaign_id=campaign_id,
+            prompt=prompt,
+            result=result,
+            parsed_signal_count=len(signals),
+            started_at=started_at,
+            ended_at=ended_at,
+            dataset_id=dataset_id,
+            scope=scope,
+            selected_comments=selected_comments,
+            input_summary=_input_summary(
+                briefs=briefs,
+                comments=comments,
+                products=products,
+                creators=creators,
+                metrics=metrics,
+                selected_comments=selected_comments,
+            ),
+        )
         return signals
     except Exception as exc:
+        ended_at = datetime.now(UTC)
+        _store_failed_llm_output(
+            campaign_id=campaign_id,
+            prompt=prompt,
+            error=str(exc),
+            started_at=started_at,
+            ended_at=ended_at,
+            dataset_id=dataset_id,
+            scope=scope,
+            selected_comments=selected_comments,
+            result=result,
+            input_summary=_input_summary(
+                briefs=briefs,
+                comments=comments,
+                products=products,
+                creators=creators,
+                metrics=metrics,
+                selected_comments=selected_comments,
+            ),
+        )
         repo.add_quality_event(
             QualityEvent(
                 campaign_id=campaign_id,
@@ -122,16 +182,72 @@ def _extract_llm_comment_signals(
 def _store_llm_output(
     campaign_id: str,
     prompt: str,
-    payload: dict,
+    result: LLMCompletionResult,
     parsed_signal_count: int,
+    started_at: datetime,
+    ended_at: datetime,
+    dataset_id: str | None,
+    scope: dict | None,
+    selected_comments: list[CommunityComment],
+    input_summary: dict,
 ) -> LLMExtractionRun:
     run = LLMExtractionRun(
         campaign_id=campaign_id,
         provider=settings.llm_provider,
-        model=settings.sglang_model if settings.llm_provider == "sglang" else None,
+        model=_active_model_name(),
+        endpoint=result.endpoint,
+        status="succeeded",
+        dataset_id=dataset_id,
+        scope=scope,
+        source_files=_source_file_metadata(campaign_id),
+        input_summary=input_summary,
+        selected_source_record_ids=[comment.id for comment in selected_comments],
         prompt=prompt,
-        raw_output=payload,
+        raw_output=result.parsed_json,
+        raw_response=result.raw_response,
+        request_metadata=result.request_metadata,
+        response_metadata=result.response_metadata,
         parsed_signal_count=parsed_signal_count,
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_ms=_duration_ms(started_at, ended_at),
+    )
+    return repo.add_llm_run(_write_llm_run(run))
+
+
+def _store_failed_llm_output(
+    campaign_id: str,
+    prompt: str,
+    error: str,
+    started_at: datetime,
+    ended_at: datetime,
+    dataset_id: str | None,
+    scope: dict | None,
+    selected_comments: list[CommunityComment],
+    result: LLMCompletionResult | None,
+    input_summary: dict,
+) -> LLMExtractionRun:
+    run = LLMExtractionRun(
+        campaign_id=campaign_id,
+        provider=settings.llm_provider,
+        model=_active_model_name(),
+        endpoint=result.endpoint if result else _active_endpoint(),
+        status="failed",
+        dataset_id=dataset_id,
+        scope=scope,
+        source_files=_source_file_metadata(campaign_id),
+        input_summary=input_summary,
+        selected_source_record_ids=[comment.id for comment in selected_comments],
+        prompt=prompt,
+        raw_output=result.parsed_json if result else {},
+        raw_response=result.raw_response if result else {},
+        request_metadata=result.request_metadata if result else {},
+        response_metadata=result.response_metadata if result else {},
+        parsed_signal_count=0,
+        error=error,
+        started_at=started_at,
+        ended_at=ended_at,
+        duration_ms=_duration_ms(started_at, ended_at),
     )
     return repo.add_llm_run(_write_llm_run(run))
 
@@ -145,6 +261,67 @@ def _write_llm_run(run: LLMExtractionRun) -> LLMExtractionRun:
         encoding="utf-8",
     )
     return run
+
+
+def _input_summary(
+    briefs: list[BriefDocument],
+    comments: list[CommunityComment],
+    products: list[ProductContext],
+    creators: list[CreatorProfile],
+    metrics: list[PerformanceMetric],
+    selected_comments: list[CommunityComment],
+) -> dict:
+    return {
+        "brief_count": len(briefs),
+        "comment_count": len(comments),
+        "product_count": len(products),
+        "creator_count": len(creators),
+        "performance_metric_count": len(metrics),
+        "selected_comment_count": len(selected_comments),
+        "selected_comment_rating_distribution": dict(
+            Counter(str(comment.source_rating) for comment in selected_comments)
+        ),
+        "selected_parent_asins": sorted(
+            {
+                comment.parent_product_id
+                for comment in selected_comments
+                if comment.parent_product_id
+            }
+        ),
+    }
+
+
+def _source_file_metadata(campaign_id: str) -> list[dict]:
+    return [
+        {
+            "id": source_file.id,
+            "filename": source_file.filename,
+            "source_type": source_file.source_type,
+            "row_count": source_file.row_count,
+            "ingested_at": source_file.ingested_at.isoformat(),
+        }
+        for source_file in repo.campaign_files(campaign_id)
+    ]
+
+
+def _duration_ms(started_at: datetime, ended_at: datetime) -> int:
+    return int((ended_at - started_at).total_seconds() * 1000)
+
+
+def _active_model_name() -> str | None:
+    if settings.llm_provider == "sglang":
+        return settings.sglang_model
+    if settings.llm_provider in {"openai", "cloud", "openai_compatible"}:
+        return settings.cloud_llm_model
+    return None
+
+
+def _active_endpoint() -> str | None:
+    if settings.llm_provider == "sglang":
+        return f"{settings.sglang_base_url.rstrip('/')}/v1/chat/completions"
+    if settings.llm_provider in {"openai", "cloud", "openai_compatible"}:
+        return f"{settings.cloud_llm_base_url.rstrip('/')}/v1/chat/completions"
+    return None
 
 
 def _build_signal_prompt(

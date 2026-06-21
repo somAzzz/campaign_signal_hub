@@ -34,7 +34,11 @@ def run_extraction(
             )
         except KeyError as exc:
             raise HTTPException(status_code=400, detail="Unknown dataset_id") from exc
-    signals = extract_signals(campaign_id)
+    signals = extract_signals(
+        campaign_id,
+        dataset_id=payload.dataset_id if payload else None,
+        scope=payload.scope.model_dump() if payload and payload.scope else None,
+    )
     save_snapshot()
     return signals
 

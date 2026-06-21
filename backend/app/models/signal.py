@@ -58,8 +58,22 @@ class LLMExtractionRun(BaseModel):
     campaign_id: str
     provider: str = "sglang"
     model: str | None = None
+    endpoint: str | None = None
+    status: str = "succeeded"
+    dataset_id: str | None = None
+    scope: dict | None = None
+    source_files: list[dict] = Field(default_factory=list)
+    input_summary: dict = Field(default_factory=dict)
+    selected_source_record_ids: list[str] = Field(default_factory=list)
     prompt: str
     raw_output: dict
+    raw_response: dict = Field(default_factory=dict)
+    request_metadata: dict = Field(default_factory=dict)
+    response_metadata: dict = Field(default_factory=dict)
     parsed_signal_count: int = 0
+    error: str | None = None
     output_path: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    duration_ms: int | None = None

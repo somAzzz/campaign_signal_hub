@@ -74,7 +74,7 @@ Amazon reviews + product metadata
         ↓
 Ingestion and source provenance
         ↓
-Local sglang extraction
+Local or cloud LLM extraction
         ↓
 Pydantic validation and quality checks
         ↓
@@ -88,7 +88,7 @@ are stored separately for debugging and audit.
 
 ## LLM Runtime
 
-The backend expects a local sglang OpenAI-compatible server:
+The backend defaults to a local sglang OpenAI-compatible server:
 
 ```text
 http://localhost:30000
@@ -102,6 +102,19 @@ CSH_SGLANG_BASE_URL=http://localhost:30000
 CSH_SGLANG_MODEL=Qwen/Qwen3.5-35B-A3B
 ```
 
+Cloud APIs can be used without code changes when they expose an
+OpenAI-compatible `/v1/chat/completions` endpoint:
+
+```bash
+CSH_LLM_PROVIDER=openai_compatible
+CSH_CLOUD_LLM_BASE_URL=https://api.openai.com
+CSH_CLOUD_LLM_MODEL=gpt-4.1-mini
+CSH_CLOUD_LLM_API_KEY=<api-key>
+```
+
+The same provider switch works for other compatible vendors by changing
+`CSH_CLOUD_LLM_BASE_URL`, `CSH_CLOUD_LLM_MODEL`, and `CSH_CLOUD_LLM_API_KEY`.
+
 The extractor uses structured JSON output, validates it with Pydantic, and falls
 back to deterministic rules if model output fails validation.
 
@@ -110,6 +123,11 @@ Raw LLM runs are written to:
 ```text
 data/processed/llm_outputs/
 ```
+
+Each run file includes audit metadata: start/end time, duration, status,
+provider, model, endpoint, selected dataset and scope, source files, record
+counts, selected source record IDs, request metadata, response usage, parsed
+signal count, and any error that caused fallback.
 
 They can also be inspected through:
 
