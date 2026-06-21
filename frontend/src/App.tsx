@@ -43,6 +43,7 @@ import type {
   ExportSummary,
   ExtractionPlan,
   ProductHealth,
+  ProductScopeOption,
   SourceRecord,
   SignalType,
   TopicCluster,
@@ -113,6 +114,7 @@ export function App() {
   const [productHealth, setProductHealth] = useState<ProductHealth[]>([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState("coffee_50");
   const [selectedScope, setSelectedScope] = useState<DatasetScopeOption | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [selectedAnalysisMode, setSelectedAnalysisMode] =
     useState<AnalysisMode>("full");
   const [selectedPlanPreset, setSelectedPlanPreset] =
@@ -213,6 +215,12 @@ export function App() {
     try {
       const profile = await getDatasetProfile(campaignId, datasetId);
       setDatasetProfile(profile);
+      setSelectedProductIds((current) => {
+        const available = new Set(
+          profile.product_options.map((product) => product.parent_asin),
+        );
+        return current.filter((parentAsin) => available.has(parentAsin));
+      });
       setSelectedScope((current) => {
         if (current) {
           const match = profile.scopes.find(
@@ -242,6 +250,14 @@ export function App() {
     }));
   }
 
+  function toggleProductScope(parentAsin: string) {
+    setSelectedProductIds((current) =>
+      current.includes(parentAsin)
+        ? current.filter((item) => item !== parentAsin)
+        : [...current, parentAsin],
+    );
+  }
+
   async function rerunExtraction() {
     if (!campaign) return;
     try {
@@ -251,16 +267,22 @@ export function App() {
         `Running ${
           selectedAnalysisMode === "full" ? "full chunked" : "fast sample"
         } extraction on ${dataset?.label ?? "selected data"} / ${
-          selectedScope?.label ?? "all products"
+          selectedProductIds.length
+            ? `${selectedProductIds.length} selected products`
+            : selectedScope?.label ?? "all products"
         }...`,
       );
+      const scope =
+        selectedProductIds.length > 0
+          ? { mode: "parent_asins", values: selectedProductIds }
+          : {
+              mode: selectedScope?.mode ?? "all",
+              value: selectedScope?.value,
+            };
       const signalList = await extractSignals(
         campaign.id,
         selectedDatasetId,
-        {
-          mode: selectedScope?.mode ?? "all",
-          value: selectedScope?.value,
-        },
+        scope,
         selectedAnalysisMode,
         extractionPlan,
       );
@@ -524,7 +546,10 @@ export function App() {
             profile={datasetProfile}
             topics={topics}
             selectedScope={selectedScope}
+            selectedProductIds={selectedProductIds}
             onSelectScope={setSelectedScope}
+            onToggleProductScope={toggleProductScope}
+            onClearProductScope={() => setSelectedProductIds([])}
             selectedPlanPreset={selectedPlanPreset}
             extractionPlan={extractionPlan}
             onSelectPlanPreset={selectPlanPreset}
@@ -732,7 +757,10 @@ function DatasetWorkspace({
   profile,
   topics,
   selectedScope,
+  selectedProductIds,
   onSelectScope,
+  onToggleProductScope,
+  onClearProductScope,
   selectedPlanPreset,
   extractionPlan,
   onSelectPlanPreset,
@@ -741,7 +769,10 @@ function DatasetWorkspace({
   profile: DatasetProfile | null;
   topics: TopicCluster[];
   selectedScope: DatasetScopeOption | null;
+  selectedProductIds: string[];
   onSelectScope: (scope: DatasetScopeOption) => void;
+  onToggleProductScope: (parentAsin: string) => void;
+  onClearProductScope: () => void;
   selectedPlanPreset: PlanPreset;
   extractionPlan: ExtractionPlan;
   onSelectPlanPreset: (preset: PlanPreset) => void;
@@ -794,6 +825,32 @@ function DatasetWorkspace({
               <span>{scope.label}</span>
               <strong>{scope.count}</strong>
             </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="health-panel product-focus-panel">
+        <div className="block-heading">
+          <PackageCheck aria-hidden="true" />
+          <div>
+            <p className="eyebrow">Product focus</p>
+            <h2>Filter by product name</h2>
+          </div>
+        </div>
+        <div className="product-focus-actions">
+          <span>{selectedProductIds.length} selected</span>
+          <button type="button" onClick={onClearProductScope}>
+            Clear
+          </button>
+        </div>
+        <div className="product-focus-list">
+          {profile.product_options.map((product) => (
+            <ProductScopeRow
+              key={product.parent_asin}
+              product={product}
+              selected={selectedProductIds.includes(product.parent_asin)}
+              onToggle={() => onToggleProductScope(product.parent_asin)}
+            />
           ))}
         </div>
       </div>
@@ -999,6 +1056,30 @@ function CampaignHealth({
         </div>
       </div>
     </section>
+  );
+}
+
+function ProductScopeRow({
+  product,
+  selected,
+  onToggle,
+}: {
+  product: ProductScopeOption;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <label className={`product-scope-row ${selected ? "selected" : ""}`}>
+      <input type="checkbox" checked={selected} onChange={onToggle} />
+      <span>
+        <strong>{product.title}</strong>
+        <small>
+          {product.store ? `${product.store} / ` : ""}
+          {product.parent_asin}
+        </small>
+      </span>
+      <em>{product.count}</em>
+    </label>
   );
 }
 

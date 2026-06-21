@@ -16,6 +16,7 @@ from app.services.repository import repo
 class DatasetScope(BaseModel):
     mode: str = "all"
     value: str | None = None
+    values: list[str] | None = None
 
 
 class DatasetPreviewItem(BaseModel):
@@ -37,6 +38,7 @@ class DatasetProfile(BaseModel):
     date_range: dict[str, str | None]
     top_brands: list[dict[str, int | str]]
     top_parent_asins: list[dict[str, int | str]]
+    product_options: list[dict[str, str | int | None]]
     preview: list[DatasetPreviewItem]
     scopes: list[dict[str, str | int]]
 
@@ -129,7 +131,7 @@ POSITIVE_ANGLE_TERMS = {
 def get_dataset_profile(dataset_id: str) -> DatasetProfile:
     path = _dataset_path(dataset_id)
     rows = _read_dataset_rows(path)
-    products = _product_store_lookup()
+    products = _product_lookup()
     parent_counts = Counter(row.get("parent_asin") or row.get("asin") for row in rows)
     parent_counts.pop("", None)
     rating_distribution = Counter(
@@ -145,10 +147,7 @@ def get_dataset_profile(dataset_id: str) -> DatasetProfile:
             )
         )
     ]
-    brand_counts = Counter(
-        products.get(row.get("parent_asin") or row.get("asin") or "", "Unknown")
-        for row in rows
-    )
+    brand_counts = Counter(_row_product_store(row, products) for row in rows)
     brand_counts.pop("Unknown", None)
 
     return DatasetProfile(
@@ -172,6 +171,7 @@ def get_dataset_profile(dataset_id: str) -> DatasetProfile:
             for asin, count in parent_counts.most_common(10)
             if asin
         ],
+        product_options=_product_options(rows, products),
         preview=_preview_rows(rows),
         scopes=_scope_options(rows, products),
     )
@@ -190,8 +190,12 @@ def build_scope_filter(scope: DatasetScope | None):
             return _as_bool(row.get("verified_purchase")) is True
         if scope.mode == "parent_asin":
             return bool(scope.value) and parent_asin == scope.value
+        if scope.mode == "parent_asins":
+            values = set(scope.values or ([scope.value] if scope.value else []))
+            return parent_asin in values
         if scope.mode == "brand":
-            store = _product_store_lookup().get(parent_asin, "")
+            product = _product_lookup().get(parent_asin)
+            store = product.store if product else ""
             return bool(scope.value) and store == scope.value
         return True
 
@@ -332,9 +336,9 @@ def _read_dataset_rows(path: Path) -> list[dict[str, str]]:
     return list(csv.DictReader(StringIO(path.read_text(encoding="utf-8"))))
 
 
-def _product_store_lookup() -> dict[str, str]:
+def _product_lookup() -> dict[str, ProductContext]:
     return {
-        record.parent_asin: record.store or "Unknown"
+        record.parent_asin: record
         for record in repo.source_records.values()
         if isinstance(record, ProductContext)
     }
@@ -342,15 +346,12 @@ def _product_store_lookup() -> dict[str, str]:
 
 def _scope_options(
     rows: list[dict[str, str]],
-    products: dict[str, str],
+    products: dict[str, ProductContext],
 ) -> list[dict[str, str | int]]:
     parent_counts = Counter(
         row.get("parent_asin") or row.get("asin") or "" for row in rows
     )
-    brand_counts = Counter(
-        products.get(row.get("parent_asin") or row.get("asin") or "", "Unknown")
-        for row in rows
-    )
+    brand_counts = Counter(_row_product_store(row, products) for row in rows)
     options: list[dict[str, str | int]] = [
         {"mode": "all", "label": "All products", "count": len(rows)},
         {
@@ -377,7 +378,7 @@ def _scope_options(
     options.extend(
         {
             "mode": "parent_asin",
-            "label": f"Parent ASIN: {parent_asin}",
+            "label": _product_scope_label(parent_asin, products),
             "value": parent_asin,
             "count": count,
         }
@@ -385,6 +386,44 @@ def _scope_options(
         if parent_asin
     )
     return options
+
+
+def _product_options(
+    rows: list[dict[str, str]],
+    products: dict[str, ProductContext],
+) -> list[dict[str, str | int | None]]:
+    parent_counts = Counter(
+        row.get("parent_asin") or row.get("asin") or "" for row in rows
+    )
+    return [
+        {
+            "parent_asin": parent_asin,
+            "title": product.title if product else parent_asin,
+            "store": product.store if product else None,
+            "count": count,
+        }
+        for parent_asin, count in parent_counts.most_common()
+        if parent_asin
+        for product in [products.get(parent_asin)]
+    ]
+
+
+def _row_product_store(
+    row: dict[str, str],
+    products: dict[str, ProductContext],
+) -> str:
+    product = products.get(row.get("parent_asin") or row.get("asin") or "")
+    return product.store if product else "Unknown"
+
+
+def _product_scope_label(
+    parent_asin: str,
+    products: dict[str, ProductContext],
+) -> str:
+    product = products.get(parent_asin)
+    if not product:
+        return f"Product: {parent_asin}"
+    return f"Product: {product.title[:72]}"
 
 
 def _preview_rows(rows: list[dict[str, str]]) -> list[DatasetPreviewItem]:

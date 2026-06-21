@@ -41,7 +41,7 @@ export function updateSignal(signalId: string, status: "approved" | "dismissed")
 export function extractSignals(
   campaignId: string,
   datasetId?: string,
-  scope?: { mode: string; value?: string },
+  scope?: { mode: string; value?: string; values?: string[] },
   analysisMode = "full",
   plan?: ExtractionPlan,
 ) {

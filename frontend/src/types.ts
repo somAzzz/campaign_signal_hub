@@ -94,6 +94,14 @@ export interface DatasetScopeOption {
   mode: string;
   label: string;
   value?: string;
+  values?: string[];
+  count: number;
+}
+
+export interface ProductScopeOption {
+  parent_asin: string;
+  title: string;
+  store?: string | null;
   count: number;
 }
 
@@ -116,6 +124,7 @@ export interface DatasetProfile {
   };
   top_brands: Array<{ brand: string; count: number }>;
   top_parent_asins: Array<{ parent_asin: string; count: number }>;
+  product_options: ProductScopeOption[];
   preview: Array<{
     bucket: string;
     rating?: number | null;

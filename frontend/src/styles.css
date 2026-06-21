@@ -436,6 +436,82 @@ meter::-webkit-meter-optimum-value {
   border-color: rgba(199, 131, 61, 0.54);
 }
 
+.product-focus-panel .block-heading {
+  margin-bottom: 10px;
+}
+
+.product-focus-actions {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.product-focus-actions button {
+  background: transparent;
+  border: 0;
+  color: var(--rust);
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 0;
+}
+
+.product-focus-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.product-scope-row {
+  align-items: center;
+  background: rgba(54, 95, 99, 0.06);
+  border: 1px solid rgba(54, 95, 99, 0.14);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+.product-scope-row.selected {
+  background: rgba(199, 131, 61, 0.14);
+  border-color: rgba(199, 131, 61, 0.54);
+}
+
+.product-scope-row input {
+  accent-color: var(--rust);
+}
+
+.product-scope-row span {
+  min-width: 0;
+}
+
+.product-scope-row strong,
+.product-scope-row small {
+  display: block;
+}
+
+.product-scope-row strong {
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-scope-row small,
+.product-scope-row em {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-style: normal;
+}
+
 .analysis-plan-panel .block-heading {
   margin-bottom: 12px;
 }
