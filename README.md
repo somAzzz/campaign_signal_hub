@@ -26,6 +26,9 @@ The system extracts:
 Every signal includes evidence snippets and source provenance so a strategist
 can inspect the original review before approving it.
 
+For a detailed interview-style project walkthrough, see
+[docs/PROJECT_INTERVIEW_BRIEF.md](docs/PROJECT_INTERVIEW_BRIEF.md).
+
 ## Current Demo Scenario
 
 Brand: `RoastHouse Coffee`
