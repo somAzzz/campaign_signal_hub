@@ -270,6 +270,12 @@ export function App() {
     );
   }
 
+  function selectAllProductScopes() {
+    setSelectedProductIds(
+      datasetProfile?.product_options.map((product) => product.parent_asin) ?? [],
+    );
+  }
+
   async function rerunExtraction() {
     if (!campaign) return;
     try {
@@ -565,6 +571,7 @@ export function App() {
             selectedProductIds={selectedProductIds}
             onSelectScope={setSelectedScope}
             onToggleProductScope={toggleProductScope}
+            onSelectAllProductScopes={selectAllProductScopes}
             onClearProductScope={() => setSelectedProductIds([])}
             selectedPlanPreset={selectedPlanPreset}
             extractionPlan={extractionPlan}
@@ -785,6 +792,7 @@ function DatasetWorkspace({
   selectedProductIds,
   onSelectScope,
   onToggleProductScope,
+  onSelectAllProductScopes,
   onClearProductScope,
   selectedPlanPreset,
   extractionPlan,
@@ -797,6 +805,7 @@ function DatasetWorkspace({
   selectedProductIds: string[];
   onSelectScope: (scope: DatasetScopeOption) => void;
   onToggleProductScope: (parentAsin: string) => void;
+  onSelectAllProductScopes: () => void;
   onClearProductScope: () => void;
   selectedPlanPreset: PlanPreset;
   extractionPlan: ExtractionPlan;
@@ -864,9 +873,14 @@ function DatasetWorkspace({
         </div>
         <div className="product-focus-actions">
           <span>{selectedProductIds.length} selected</span>
-          <button type="button" onClick={onClearProductScope}>
-            Clear
-          </button>
+          <div>
+            <button type="button" onClick={onSelectAllProductScopes}>
+              Select all
+            </button>
+            <button type="button" onClick={onClearProductScope}>
+              Deselect all
+            </button>
+          </div>
         </div>
         <div className="product-focus-list">
           {profile.product_options.map((product) => (
