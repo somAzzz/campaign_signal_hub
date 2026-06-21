@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowUp,
   BarChart3,
   Check,
   ChevronRight,
@@ -130,6 +131,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [extracting, setExtracting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -179,6 +181,16 @@ export function App() {
   useEffect(() => {
     setSelectedEvidenceId(selectedSignal?.evidence[0]?.source_record_id ?? null);
   }, [selectedSignal?.id]);
+
+  useEffect(() => {
+    function handleScroll() {
+      setShowBackToTop(window.scrollY > 520);
+    }
+
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   async function load() {
     try {
@@ -362,6 +374,10 @@ export function App() {
     } finally {
       setExporting(false);
     }
+  }
+
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   if (loading) {
@@ -732,6 +748,15 @@ export function App() {
           </section>
         )}
       </section>
+      <button
+        className={`back-to-top ${showBackToTop ? "visible" : ""}`}
+        type="button"
+        aria-label="Back to top"
+        title="Back to top"
+        onClick={scrollToTop}
+      >
+        <ArrowUp aria-hidden="true" />
+      </button>
     </main>
   );
 }
