@@ -1,0 +1,6 @@
+date,platform,campaign_phase,content_id,creator_id,impressions,clicks,ctr,spend,cpc,conversions,conversion_rate,sentiment_positive,sentiment_negative,comment_volume
+2026-06-01,TikTok,teaser,tt_jordan_brew_strength,cf_001,104000,4264,0.041,930.00,0.22,218,0.051,0.68,0.18,562
+2026-06-02,Instagram Reels,teaser,ig_priya_cold_brew,cf_002,61000,2013,0.033,710.00,0.35,141,0.070,0.74,0.09,236
+2026-06-03,TikTok,launch,tt_marcus_value_test,cf_003,148000,7400,0.050,1710.00,0.23,194,0.026,0.49,0.34,902
+2026-06-04,Instagram Reels,launch,ig_alina_kona_claim,cf_004,42000,1176,0.028,460.00,0.39,74,0.063,0.62,0.21,188
+

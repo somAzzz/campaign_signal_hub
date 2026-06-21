@@ -1,0 +1,6 @@
+date,platform,campaign_phase,content_id,creator_id,impressions,clicks,ctr,spend,cpc,conversions,conversion_rate,sentiment_positive,sentiment_negative,comment_volume
+2026-06-01,TikTok,teaser,tt_maya_texture,cr_001,94000,3102,0.033,820.00,0.26,154,0.050,0.72,0.12,486
+2026-06-02,Instagram Reels,teaser,ig_nora_patchtest,cr_002,51000,1887,0.037,640.00,0.34,119,0.063,0.76,0.08,214
+2026-06-03,TikTok,launch,tt_june_price,cr_003,132000,5940,0.045,1580.00,0.27,168,0.028,0.51,0.31,829
+2026-06-04,Instagram Reels,launch,ig_elena_finish,cr_004,44000,1122,0.026,410.00,0.37,88,0.078,0.69,0.15,167
+

@@ -1,0 +1,12 @@
+rating,title,text,asin,parent_asin,user_id,timestamp,helpful_vote,verified_purchase,product_category
+5,Soft without feeling heavy,"This made my hair feel soft without turning it greasy. The smell is fresh but not too strong for my morning routine.",B00GN001,B00GN001,U001,1704056400000,4,true,All_Beauty
+2,Leaked in the box,"The product itself might be fine but the bottle leaked all over the box. I would not order again until the packaging is fixed.",B00GN002,B00GN002,U002,1704142800000,7,true,All_Beauty
+4,Gentle daily product,"I have sensitive skin and this felt gentle for daily use. I still patch tested first, but so far no irritation.",B00GN003,B00GN003,U003,1704229200000,2,true,All_Beauty
+1,Too strong for me,"The scent was way too strong and lingered on my clothes. If you get headaches from fragrance this is not subtle.",B00GN004,B00GN004,U004,1704315600000,9,true,All_Beauty
+5,Works after shower,"Works best right after a shower. My skin stayed moisturized through the afternoon and did not feel sticky.",B00GN005,B00GN005,U005,1704402000000,3,true,All_Beauty
+3,Good but expensive,"I like the texture and it works, but it feels expensive for the size. I would wait for a sale.",B00GN006,B00GN006,U006,1704488400000,1,true,All_Beauty
+2,Sticky finish,"The finish was sticky on my arms for almost an hour. It smelled nice but I could not get past the texture.",B00GN007,B00GN007,U007,1704574800000,5,true,All_Beauty
+4,Nice scent,"The smell is clean and botanical, not candy sweet. I wish the pump gave a little more control.",B00GN008,B00GN008,U008,1704661200000,0,true,All_Beauty
+1,Rash after using,"I got a rash after using it twice. Maybe it works for others, but I would be careful if your skin reacts easily.",B00GN009,B00GN009,U009,1704747600000,11,true,All_Beauty
+5,Moisture without shine,"My hair looks smoother and soft, but not shiny in a fake way. It works better than the heavier cream I used before.",B00GN010,B00GN010,U010,1704834000000,6,true,All_Beauty
+
