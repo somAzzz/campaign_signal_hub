@@ -345,13 +345,30 @@ def _store_failed_llm_output(
 
 def _write_llm_run(run: LLMExtractionRun) -> LLMExtractionRun:
     LLM_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = LLM_OUTPUT_DIR / f"{run.campaign_id}_{run.id}.json"
+    output_path = LLM_OUTPUT_DIR / _llm_run_filename(run)
     run.output_path = str(output_path)
     output_path.write_text(
         json.dumps(run.model_dump(mode="json"), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     return run
+
+
+def _llm_run_filename(run: LLMExtractionRun) -> str:
+    timestamp = run.started_at or run.created_at
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    timestamp = timestamp.astimezone(UTC)
+    executed_at = timestamp.strftime("%Y%m%dT%H%M%S%fZ")
+    dataset = _filename_slug(run.dataset_id or "no_dataset")
+    campaign_id = _filename_slug(run.campaign_id)[:8]
+    run_id = _filename_slug(run.id)[:8]
+    return f"{executed_at}_{dataset}_{campaign_id}_{run_id}.json"
+
+
+def _filename_slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-_")
+    return slug or "unknown"
 
 
 def _input_summary(

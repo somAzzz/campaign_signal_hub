@@ -125,6 +125,27 @@ available:
 Custom mode lets the user set all four values before running extraction. The
 same values are sent to the backend with the extraction request and recorded in
 each LLM run under `input_summary.extraction_plan`.
+LLM output files are written to `data/processed/llm_outputs/` with execution
+time first, for example
+`20260621T095020417213Z_coffee_50_e416d041_623d2f5a.json`.
+
+Parameter meaning:
+
+- `Reviews/chunk`: how many representative reviews are sent to the LLM in each
+  chunk. Higher values give the model more evidence per prompt, but each call is
+  longer and slower.
+- `Max chunks`: the maximum number of chunks the backend will send to the LLM
+  for one extraction run. Higher values increase coverage across topics,
+  products, and rating groups.
+- `Chunk threshold`: the minimum number of loaded comments required before the
+  backend uses multi-chunk full analysis. If the dataset is smaller than this,
+  the run falls back to one balanced sample chunk.
+- `Max signals`: the maximum number of merged business signals returned after
+  all chunk-level LLM results are combined and deduplicated.
+
+For quick prompt checks, use `Fast sample` or a low `Max chunks` value. For
+larger datasets such as 50,000 comments, use `Full chunks` with `Broad` or a
+custom plan when the goal is wider market coverage.
 
 ## LLM Runtime
 
