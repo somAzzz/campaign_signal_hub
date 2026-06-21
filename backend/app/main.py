@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import campaigns, exports, signals, uploads
 from app.core.config import settings
+from app.services.persistence import load_snapshot, save_snapshot
 from app.services.seed import seed_demo_data
 
 
@@ -24,7 +25,9 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _seed_demo() -> None:
-        seed_demo_data()
+        if not load_snapshot():
+            seed_demo_data()
+            save_snapshot()
 
     @app.get("/health")
     def health() -> dict[str, str]:

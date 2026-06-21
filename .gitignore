@@ -13,4 +13,5 @@ frontend/dist/
 *.sqlite
 data/raw/
 data/processed/
+data/state/
 data/samples/*20k*.csv

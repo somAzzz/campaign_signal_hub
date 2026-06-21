@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.models.signal import CampaignSignal, SignalUpdate
 from app.services.analysis import DatasetScope, build_scope_filter
 from app.services.datasets import load_comment_dataset
+from app.services.persistence import save_snapshot
 from app.services.repository import repo
 from app.services.signal_extractor import extract_signals
 
@@ -33,7 +34,9 @@ def run_extraction(
             )
         except KeyError as exc:
             raise HTTPException(status_code=400, detail="Unknown dataset_id") from exc
-    return extract_signals(campaign_id)
+    signals = extract_signals(campaign_id)
+    save_snapshot()
+    return signals
 
 
 @router.get(
@@ -58,6 +61,7 @@ def update_signal(signal_id: str, payload: SignalUpdate) -> CampaignSignal:
         raise HTTPException(status_code=404, detail="Signal not found")
     signal.status = payload.status
     repo.signals[signal.id] = signal
+    save_snapshot()
     return signal
 
 

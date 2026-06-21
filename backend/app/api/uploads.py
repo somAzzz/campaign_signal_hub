@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.services import ingestion
+from app.services.persistence import save_snapshot
 from app.services.repository import repo
 
 router = APIRouter()
@@ -33,4 +34,5 @@ async def upload_source_file(
     else:
         raise HTTPException(status_code=400, detail="Unsupported source_type")
 
+    save_snapshot()
     return {"source_type": source_type, "records_ingested": len(records)}

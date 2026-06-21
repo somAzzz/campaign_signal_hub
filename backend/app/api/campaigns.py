@@ -8,6 +8,7 @@ from app.services.analysis import (
     get_dataset_profile,
 )
 from app.services.datasets import list_comment_datasets
+from app.services.persistence import save_snapshot
 from app.services.repository import repo
 
 router = APIRouter()
@@ -15,7 +16,9 @@ router = APIRouter()
 
 @router.post("", response_model=Campaign)
 def create_campaign(payload: CampaignCreate) -> Campaign:
-    return repo.add_campaign(Campaign(**payload.model_dump()))
+    campaign = repo.add_campaign(Campaign(**payload.model_dump()))
+    save_snapshot()
+    return campaign
 
 
 @router.get("", response_model=list[CampaignDetail])
