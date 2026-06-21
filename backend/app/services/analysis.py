@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from app.models.signal import CampaignSignal
 from app.models.source import CommunityComment, ProductContext
-from app.services.datasets import DATASET_CATALOG, SAMPLE_DIR
+from app.services.datasets import get_comment_dataset
 from app.services.repository import repo
 
 
@@ -323,9 +323,7 @@ def signal_strength(signal: CampaignSignal) -> dict:
 
 
 def _dataset_path(dataset_id: str) -> Path:
-    if dataset_id not in DATASET_CATALOG:
-        raise KeyError(dataset_id)
-    return SAMPLE_DIR / DATASET_CATALOG[dataset_id]["filename"]
+    return Path(get_comment_dataset(dataset_id).path)
 
 
 def _read_dataset_rows(path: Path) -> list[dict[str, str]]:

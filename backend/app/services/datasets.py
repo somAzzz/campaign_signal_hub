@@ -20,7 +20,7 @@ class DatasetOption(BaseModel):
     description: str
 
 
-DATASET_CATALOG = {
+DATASET_OVERRIDES = {
     "coffee_50": {
         "label": "Coffee reviews / 50 rows",
         "filename": "coffee_50_comments.csv",
@@ -35,35 +35,17 @@ DATASET_CATALOG = {
 
 
 def list_comment_datasets() -> list[DatasetOption]:
-    datasets: list[DatasetOption] = []
-    for dataset_id, config in DATASET_CATALOG.items():
-        path = SAMPLE_DIR / config["filename"]
-        datasets.append(
-            DatasetOption(
-                id=dataset_id,
-                label=config["label"],
-                filename=config["filename"],
-                path=str(path),
-                record_count=_count_csv_records(path),
-                description=config["description"],
-            )
-        )
-    return datasets
+    return sorted(
+        [_dataset_option_from_path(path) for path in SAMPLE_DIR.glob("*_comments.csv")],
+        key=lambda dataset: (dataset.id.split("_")[0], dataset.record_count),
+    )
 
 
 def get_comment_dataset(dataset_id: str) -> DatasetOption:
-    if dataset_id not in DATASET_CATALOG:
+    path = SAMPLE_DIR / f"{dataset_id}_comments.csv"
+    if not path.exists():
         raise KeyError(dataset_id)
-    config = DATASET_CATALOG[dataset_id]
-    path = SAMPLE_DIR / config["filename"]
-    return DatasetOption(
-        id=dataset_id,
-        label=config["label"],
-        filename=config["filename"],
-        path=str(path),
-        record_count=_count_csv_records(path),
-        description=config["description"],
-    )
+    return _dataset_option_from_path(path)
 
 
 def load_comment_dataset(
@@ -71,11 +53,12 @@ def load_comment_dataset(
     dataset_id: str,
     row_filter: Callable[[dict[str, str]], bool] | None = None,
 ) -> int:
-    if dataset_id not in DATASET_CATALOG:
-        raise KeyError(dataset_id)
+    try:
+        dataset = get_comment_dataset(dataset_id)
+    except KeyError as exc:
+        raise KeyError(dataset_id) from exc
 
-    config = DATASET_CATALOG[dataset_id]
-    path = SAMPLE_DIR / config["filename"]
+    path = Path(dataset.path)
     repo.clear_campaign_records_by_type(campaign_id, "community_comment")
     content = path.read_text(encoding="utf-8")
     if row_filter is not None:
@@ -83,10 +66,30 @@ def load_comment_dataset(
 
     records = parse_comments_csv(
         campaign_id=campaign_id,
-        filename=config["filename"],
+        filename=dataset.filename,
         content=content,
     )
     return len(records)
+
+
+def _dataset_option_from_path(path: Path) -> DatasetOption:
+    dataset_id = path.name.removesuffix("_comments.csv")
+    override = DATASET_OVERRIDES.get(dataset_id, {})
+    record_count = _count_csv_records(path)
+    return DatasetOption(
+        id=dataset_id,
+        label=override.get("label") or _label_from_dataset_id(dataset_id, record_count),
+        filename=path.name,
+        path=str(path),
+        record_count=record_count,
+        description=override.get("description") or "Auto-discovered sample CSV.",
+    )
+
+
+def _label_from_dataset_id(dataset_id: str, record_count: int) -> str:
+    parts = dataset_id.split("_")
+    family = parts[0].replace("-", " ").title()
+    return f"{family} reviews / {record_count:,} rows"
 
 
 def _count_csv_records(path: Path) -> int:
