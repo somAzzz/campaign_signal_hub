@@ -7,6 +7,12 @@ The current demo focuses on coffee products. It combines Amazon review data,
 product metadata, a campaign brief, creator profiles, and performance snapshots
 to extract signals a brand or agency team can actually use.
 
+## Live Demo
+
+A static GitHub Pages demo is available at:
+
+<https://somazzz.github.io/campaign_signal_hub/>
+
 ## What It Does
 
 Marketing teams often have plenty of data but not enough structured judgment:
