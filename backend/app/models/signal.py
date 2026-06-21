@@ -36,6 +36,8 @@ class CampaignSignal(BaseModel):
     severity: str = "medium"
     recommended_action: str
     evidence: list[EvidenceItem] = Field(default_factory=list)
+    strength: dict = Field(default_factory=dict)
+    source_chunks: list[str] = Field(default_factory=list)
     status: SignalStatus = SignalStatus.pending
 
 

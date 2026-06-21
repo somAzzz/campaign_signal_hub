@@ -74,7 +74,11 @@ Amazon reviews + product metadata
         ↓
 Ingestion and source provenance
         ↓
+Full-sample clustering and chunk planning
+        ↓
 Local or cloud LLM extraction
+        ↓
+Signal merge and strength scoring
         ↓
 Pydantic validation and quality checks
         ↓
@@ -85,6 +89,25 @@ Evidence inspection and client-safe export
 
 The frontend only shows reviewed campaign signals and evidence. Raw LLM outputs
 are stored separately for debugging and audit.
+
+## Analysis Engine
+
+Small samples are analyzed as one balanced review slice. Larger samples are not
+sent to the model as one prompt. The backend first scans the full loaded sample
+and creates analysis chunks:
+
+- topic chunks such as weak flavor, bitterness, freshness, machine fit, and
+  price/value
+- product-risk chunks for products with concentrated low-rating pressure
+- low-rating objection chunks
+- high-rating message-hook chunks
+
+Each chunk sends a representative set of reviews to the LLM, while the chunk
+metadata keeps full-sample support counts. The pipeline then merges similar
+signals across chunks and records strength fields such as supporting review
+count, affected products, rating skew, helpful votes, evidence count, and source
+chunk count. This is what lets a 50,000-review run produce broader, more
+defensible business signals than a 5,000-review run.
 
 ## LLM Runtime
 

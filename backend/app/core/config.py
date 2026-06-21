@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 120
     llm_max_tokens: int = 3072
     llm_batch_comments: int = 16
+    llm_chunk_comments: int = 18
+    llm_max_chunks: int = 10
+    llm_min_comments_for_chunking: int = 200
+    llm_max_comment_signals: int = 24
 
 
 settings = Settings()

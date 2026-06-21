@@ -40,6 +40,8 @@ export interface CampaignSignal {
   severity: string;
   recommended_action: string;
   evidence: EvidenceItem[];
+  strength?: Record<string, number | string | null>;
+  source_chunks?: string[];
   status: SignalStatus;
 }
 

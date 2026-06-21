@@ -43,7 +43,7 @@ def build_campaign_export(campaign_id: str, client_safe: bool = True) -> dict:
                 "title": signal.title,
                 "summary": signal.summary,
                 "recommended_action": signal.recommended_action,
-                "strength": signal_strength(signal),
+                "strength": signal.strength or signal_strength(signal),
                 "evidence": [
                     _safe_evidence(item.model_dump(), client_safe)
                     for item in signal.evidence
@@ -106,7 +106,7 @@ def _signal_summary(signal) -> dict:
         "summary": signal.summary,
         "recommended_action": signal.recommended_action,
         "severity": signal.severity,
-        "strength": signal_strength(signal),
+        "strength": signal.strength or signal_strength(signal),
     }
 
 

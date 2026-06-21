@@ -974,7 +974,10 @@ function SignalCard({
       <p>{signal.summary}</p>
       <div className="signal-footer">
         <span>{Math.round(signal.confidence * 100)}% confidence</span>
-        <span>{signal.evidence.length} evidence</span>
+        <span>
+          {signal.strength?.supporting_review_count ?? signal.evidence.length} support
+        </span>
+        <span>{signal.source_chunks?.length ?? 0} chunks</span>
         <span>{signal.severity} severity</span>
         <ChevronRight aria-hidden="true" />
       </div>

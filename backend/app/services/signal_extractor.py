@@ -1,7 +1,10 @@
 import json
-from collections import Counter
+import re
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from statistics import mean
 
 from app.core.config import settings
 from app.models.signal import (
@@ -19,7 +22,7 @@ from app.models.source import (
     ProductContext,
     SourceRecord,
 )
-from app.services.analysis import cluster_comments
+from app.services.analysis import TOPIC_DEFINITIONS, cluster_comments
 from app.services.datasets import get_comment_dataset
 from app.services.llm_client import LLMCompletionResult, get_llm_client
 from app.services.quality_checks import validate_signal
@@ -58,6 +61,18 @@ POSITIVE_TERMS = {
     "keurig": "Single-serve convenience is a usable campaign angle.",
     "espresso": "Espresso use cases can support product-specific content.",
 }
+
+SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3}
+
+
+@dataclass
+class CommentChunk:
+    id: str
+    label: str
+    description: str
+    chunk_type: str
+    comments: list[CommunityComment]
+    metadata: dict = field(default_factory=dict)
 
 
 def extract_signals(
@@ -113,21 +128,61 @@ def _extract_llm_comment_signals(
     if not comments:
         return []
 
-    selected_comments = _select_comments_for_llm(comments, settings.llm_batch_comments)
+    chunks = _plan_comment_chunks(comments, products)
+    client = get_llm_client()
+    signals: list[CampaignSignal] = []
+    for chunk in chunks:
+        signals.extend(
+            _extract_llm_chunk_signals(
+                client=client,
+                campaign_id=campaign_id,
+                briefs=briefs,
+                comments=comments,
+                products=products,
+                creators=creators,
+                metrics=metrics,
+                chunk=chunk,
+                dataset_id=dataset_id,
+                scope=scope,
+            )
+        )
+
+    return _merge_similar_signals(signals, comments)[: settings.llm_max_comment_signals]
+
+
+def _extract_llm_chunk_signals(
+    client,
+    campaign_id: str,
+    briefs: list[BriefDocument],
+    comments: list[CommunityComment],
+    products: list[ProductContext],
+    creators: list[CreatorProfile],
+    metrics: list[PerformanceMetric],
+    chunk: CommentChunk,
+    dataset_id: str | None,
+    scope: dict | None,
+) -> list[CampaignSignal]:
+    selected_comments = chunk.comments
     prompt = _build_signal_prompt(
         campaign_id,
         briefs,
         selected_comments,
         products,
+        chunk=chunk,
     )
     started_at = datetime.now(UTC)
     result: LLMCompletionResult | None = None
     try:
-        client = get_llm_client()
         result = client.complete_json(prompt)
         ended_at = datetime.now(UTC)
         payload = result.parsed_json
-        signals = _signals_from_llm_payload(campaign_id, payload, comments)
+        signals = _signals_from_llm_payload(
+            campaign_id,
+            payload,
+            comments,
+            support_comments=chunk.comments,
+            chunk=chunk,
+        )
         _store_llm_output(
             campaign_id=campaign_id,
             prompt=prompt,
@@ -145,6 +200,7 @@ def _extract_llm_comment_signals(
                 creators=creators,
                 metrics=metrics,
                 selected_comments=selected_comments,
+                chunk=chunk,
             ),
         )
         return signals
@@ -167,6 +223,7 @@ def _extract_llm_comment_signals(
                 creators=creators,
                 metrics=metrics,
                 selected_comments=selected_comments,
+                chunk=chunk,
             ),
         )
         repo.add_quality_event(
@@ -275,8 +332,9 @@ def _input_summary(
     creators: list[CreatorProfile],
     metrics: list[PerformanceMetric],
     selected_comments: list[CommunityComment],
+    chunk: CommentChunk | None = None,
 ) -> dict:
-    return {
+    summary = {
         "brief_count": len(briefs),
         "comment_count": len(comments),
         "product_count": len(products),
@@ -294,6 +352,16 @@ def _input_summary(
             }
         ),
     }
+    if chunk is not None:
+        summary["chunk"] = {
+            "id": chunk.id,
+            "label": chunk.label,
+            "type": chunk.chunk_type,
+            "description": chunk.description,
+            "source_comment_count": chunk.metadata.get("source_comment_count"),
+            "metadata": chunk.metadata,
+        }
+    return summary
 
 
 def _source_file_metadata(campaign_id: str) -> list[dict]:
@@ -352,11 +420,222 @@ def _active_endpoint() -> str | None:
     return None
 
 
+def _plan_comment_chunks(
+    comments: list[CommunityComment],
+    products: list[ProductContext],
+) -> list[CommentChunk]:
+    if len(comments) < settings.llm_min_comments_for_chunking:
+        selected = _select_comments_for_llm(comments, settings.llm_batch_comments)
+        return [
+            _make_chunk(
+                chunk_id="balanced_sample",
+                label="Balanced review sample",
+                description="Balanced low, mixed, and high-rating review sample.",
+                chunk_type="balanced_sample",
+                comments=selected,
+                source_comments=comments,
+            )
+        ]
+
+    chunks: list[CommentChunk] = []
+    chunks.extend(_topic_chunks(comments))
+    chunks.extend(_product_risk_chunks(comments, products))
+    chunks.extend(_rating_chunks(comments))
+    return _dedupe_chunks(chunks)[: settings.llm_max_chunks]
+
+
+def _topic_chunks(comments: list[CommunityComment]) -> list[CommentChunk]:
+    chunks: list[CommentChunk] = []
+    for cluster in cluster_comments(comments):
+        definition = TOPIC_DEFINITIONS.get(cluster.id)
+        if not definition:
+            continue
+        hits = [
+            comment
+            for comment in comments
+            if any(term in comment.text.lower() for term in definition["terms"])
+        ]
+        if len(hits) < 3:
+            continue
+        selected = _select_representative_comments(hits, settings.llm_chunk_comments)
+        chunks.append(
+            _make_chunk(
+                chunk_id=f"topic_{cluster.id}",
+                label=cluster.label,
+                description=cluster.description,
+                chunk_type="topic",
+                comments=selected,
+                source_comments=hits,
+            )
+        )
+    return chunks
+
+
+def _product_risk_chunks(
+    comments: list[CommunityComment],
+    products: list[ProductContext],
+) -> list[CommentChunk]:
+    product_map = {product.parent_asin: product for product in products}
+    grouped: dict[str, list[CommunityComment]] = defaultdict(list)
+    for comment in comments:
+        if comment.parent_product_id:
+            grouped[comment.parent_product_id].append(comment)
+
+    scored = []
+    for parent_asin, product_comments in grouped.items():
+        low_count = sum(
+            1
+            for comment in product_comments
+            if comment.source_rating is not None and comment.source_rating <= 2
+        )
+        if low_count < 2:
+            continue
+        scored.append((low_count, len(product_comments), parent_asin, product_comments))
+
+    chunks: list[CommentChunk] = []
+    for low_count, _, parent_asin, product_comments in sorted(scored, reverse=True)[:3]:
+        product = product_map.get(parent_asin)
+        selected = _select_representative_comments(
+            product_comments,
+            settings.llm_chunk_comments,
+        )
+        chunks.append(
+            _make_chunk(
+                chunk_id=f"product_{parent_asin}",
+                label=f"Product risk / {product.title if product else parent_asin}",
+                description=(
+                    f"Product-level risk analysis for {parent_asin}; "
+                    f"{low_count} low-rating reviews in the loaded sample."
+                ),
+                chunk_type="product_risk",
+                comments=selected,
+                source_comments=product_comments,
+                metadata={"parent_asin": parent_asin},
+            )
+        )
+    return chunks
+
+
+def _rating_chunks(comments: list[CommunityComment]) -> list[CommentChunk]:
+    low_rating = [
+        comment
+        for comment in comments
+        if comment.source_rating is not None and comment.source_rating <= 2
+    ]
+    positive = [
+        comment
+        for comment in comments
+        if comment.source_rating is not None and comment.source_rating >= 4
+    ]
+    chunks: list[CommentChunk] = []
+    if low_rating:
+        chunks.append(
+            _make_chunk(
+                chunk_id="rating_low_helpful",
+                label="Low-rating objection pressure",
+                description=(
+                    "Most useful low-rating reviews, used to identify objections "
+                    "that could scale into paid-media risk."
+                ),
+                chunk_type="rating_low",
+                comments=_select_representative_comments(
+                    low_rating, settings.llm_chunk_comments
+                ),
+                source_comments=low_rating,
+            )
+        )
+    if positive:
+        chunks.append(
+            _make_chunk(
+                chunk_id="rating_positive_hooks",
+                label="High-rating message hooks",
+                description=(
+                    "Positive reviews, used to identify defensible message angles "
+                    "and creator hooks."
+                ),
+                chunk_type="rating_positive",
+                comments=_select_representative_comments(
+                    positive, settings.llm_chunk_comments
+                ),
+                source_comments=positive,
+            )
+        )
+    return chunks
+
+
+def _make_chunk(
+    chunk_id: str,
+    label: str,
+    description: str,
+    chunk_type: str,
+    comments: list[CommunityComment],
+    source_comments: list[CommunityComment],
+    metadata: dict | None = None,
+) -> CommentChunk:
+    ratings = [
+        comment.source_rating
+        for comment in source_comments
+        if comment.source_rating is not None
+    ]
+    affected_products = {
+        comment.parent_product_id or comment.product_id
+        for comment in source_comments
+        if comment.parent_product_id or comment.product_id
+    }
+    chunk_metadata = {
+        "source_comment_count": len(source_comments),
+        "selected_comment_count": len(comments),
+        "affected_products": len(affected_products),
+        "average_rating": round(mean(ratings), 2) if ratings else None,
+        "low_rating_count": sum(1 for rating in ratings if rating <= 2),
+        "high_rating_count": sum(1 for rating in ratings if rating >= 4),
+        "helpful_votes": sum(comment.helpful_vote or 0 for comment in source_comments),
+        **(metadata or {}),
+    }
+    return CommentChunk(
+        id=chunk_id,
+        label=label,
+        description=description,
+        chunk_type=chunk_type,
+        comments=comments,
+        metadata=chunk_metadata,
+    )
+
+
+def _dedupe_chunks(chunks: list[CommentChunk]) -> list[CommentChunk]:
+    deduped: list[CommentChunk] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        comment_key = tuple(sorted(comment.id for comment in chunk.comments))
+        key = f"{chunk.id}:{comment_key}"
+        if key in seen or not chunk.comments:
+            continue
+        seen.add(key)
+        deduped.append(chunk)
+    return deduped
+
+
+def _select_representative_comments(
+    comments: list[CommunityComment],
+    limit: int,
+) -> list[CommunityComment]:
+    def score(comment: CommunityComment) -> tuple:
+        rating = comment.source_rating or 0
+        low_rating_bonus = 5 if rating <= 2 else 0
+        helpful = comment.helpful_vote or 0
+        text_length = min(len(comment.text), 1200)
+        return (low_rating_bonus, helpful, text_length)
+
+    ranked = sorted(comments, key=score, reverse=True)
+    return _select_comments_for_llm(ranked, limit)
+
+
 def _build_signal_prompt(
     campaign_id: str,
     briefs: list[BriefDocument],
     comments: list[CommunityComment],
     products: list[ProductContext],
+    chunk: CommentChunk | None = None,
 ) -> str:
     product_map = {
         product.parent_asin: product for product in products if product.parent_asin
@@ -385,6 +664,18 @@ def _build_signal_prompt(
         )
 
     topic_rows = [cluster.model_dump() for cluster in cluster_comments(comments)[:6]]
+    chunk_context = {}
+    if chunk is not None:
+        chunk_context = {
+            "id": chunk.id,
+            "label": chunk.label,
+            "type": chunk.chunk_type,
+            "description": chunk.description,
+            "source_comment_count": chunk.metadata.get("source_comment_count"),
+            "affected_products": chunk.metadata.get("affected_products"),
+            "average_rating": chunk.metadata.get("average_rating"),
+            "helpful_votes": chunk.metadata.get("helpful_votes"),
+        }
     schema = {
         "signals": [
             {
@@ -409,7 +700,7 @@ def _build_signal_prompt(
         "/no_think\n"
         "Analyze these Amazon coffee reviews as campaign intelligence.\n"
         "Return one JSON object only. Do not include markdown.\n"
-        "Create 4 to 7 evidence-backed signals for a marketing campaign team.\n"
+        "Create 3 to 5 evidence-backed signals for this analysis chunk.\n"
         "Use the topic clusters as directional context, then cite exact source rows.\n"
         "Allowed signal_type values: audience_tension, risk_flag, message_angle, "
         "content_opportunity, next_action.\n"
@@ -422,6 +713,7 @@ def _build_signal_prompt(
         "- severity must be low, medium, or high.\n\n"
         f"Campaign id: {campaign_id}\n"
         f"Campaign brief:\n{brief_text}\n\n"
+        f"Analysis chunk:\n{json.dumps(chunk_context, ensure_ascii=False)}\n\n"
         f"Topic clusters:\n{json.dumps(topic_rows, ensure_ascii=False)}\n\n"
         f"Required JSON schema example:\n{json.dumps(schema)}\n\n"
         f"Source rows:\n{json.dumps(source_rows, ensure_ascii=False)}"
@@ -432,6 +724,8 @@ def _signals_from_llm_payload(
     campaign_id: str,
     payload: dict,
     comments: list[CommunityComment],
+    support_comments: list[CommunityComment] | None = None,
+    chunk: CommentChunk | None = None,
 ) -> list[CampaignSignal]:
     source_map: dict[str, SourceRecord] = {comment.id: comment for comment in comments}
     raw_signals = payload.get("signals")
@@ -445,18 +739,19 @@ def _signals_from_llm_payload(
         evidence = _coerce_evidence(raw.get("evidence"), source_map)
         if not evidence:
             continue
-        signals.append(
-            CampaignSignal(
-                campaign_id=campaign_id,
-                signal_type=SignalType(raw.get("signal_type")),
-                title=str(raw.get("title") or "Untitled signal")[:140],
-                summary=str(raw.get("summary") or "")[:900],
-                confidence=float(raw.get("confidence") or 0.5),
-                severity=str(raw.get("severity") or "medium").lower(),
-                recommended_action=str(raw.get("recommended_action") or "")[:900],
-                evidence=evidence,
-            )
+        signal = CampaignSignal(
+            campaign_id=campaign_id,
+            signal_type=SignalType(raw.get("signal_type")),
+            title=str(raw.get("title") or "Untitled signal")[:140],
+            summary=str(raw.get("summary") or "")[:900],
+            confidence=float(raw.get("confidence") or 0.5),
+            severity=str(raw.get("severity") or "medium").lower(),
+            recommended_action=str(raw.get("recommended_action") or "")[:900],
+            evidence=evidence,
+            source_chunks=[chunk.id] if chunk else [],
         )
+        _apply_signal_strength(signal, support_comments or comments)
+        signals.append(signal)
     return signals
 
 
@@ -488,6 +783,173 @@ def _coerce_evidence(
         )
 
     return evidence_items
+
+
+def _merge_similar_signals(
+    signals: list[CampaignSignal],
+    comments: list[CommunityComment],
+) -> list[CampaignSignal]:
+    merged: list[CampaignSignal] = []
+    for signal in sorted(signals, key=_signal_sort_key, reverse=True):
+        match = _find_merge_target(merged, signal)
+        if match is None:
+            merged.append(signal)
+            continue
+        _merge_signal_into(match, signal)
+
+    for signal in merged:
+        if signal.strength:
+            signal.strength["evidence_count"] = len(signal.evidence)
+            signal.strength["source_chunk_count"] = len(signal.source_chunks)
+            continue
+        if evidence_comments := _evidence_comments(signal, comments):
+            _apply_signal_strength(signal, evidence_comments)
+
+    return sorted(merged, key=_signal_sort_key, reverse=True)
+
+
+def _find_merge_target(
+    existing_signals: list[CampaignSignal],
+    signal: CampaignSignal,
+) -> CampaignSignal | None:
+    signal_tokens = _signal_tokens(signal)
+    for existing in existing_signals:
+        if existing.signal_type != signal.signal_type:
+            continue
+        existing_tokens = _signal_tokens(existing)
+        if _jaccard(existing_tokens, signal_tokens) >= 0.35:
+            return existing
+    return None
+
+
+def _merge_signal_into(target: CampaignSignal, source: CampaignSignal) -> None:
+    target.confidence = max(target.confidence, source.confidence)
+    target.severity = _higher_severity(target.severity, source.severity)
+    if len(source.summary) > len(target.summary):
+        target.summary = source.summary
+    if len(source.recommended_action) > len(target.recommended_action):
+        target.recommended_action = source.recommended_action
+
+    existing_evidence_ids = {item.source_record_id for item in target.evidence}
+    for item in source.evidence:
+        if item.source_record_id not in existing_evidence_ids:
+            target.evidence.append(item)
+            existing_evidence_ids.add(item.source_record_id)
+    target.evidence = target.evidence[:8]
+    target.source_chunks = sorted(set(target.source_chunks + source.source_chunks))
+    target.strength = _combine_strength(target.strength, source.strength)
+    target.strength["source_chunk_count"] = len(target.source_chunks)
+
+
+def _apply_signal_strength(
+    signal: CampaignSignal,
+    support_comments: list[CommunityComment],
+) -> None:
+    ratings = [
+        comment.source_rating
+        for comment in support_comments
+        if comment.source_rating is not None
+    ]
+    affected_products = {
+        comment.parent_product_id or comment.product_id
+        for comment in support_comments
+        if comment.parent_product_id or comment.product_id
+    }
+    low_count = sum(1 for rating in ratings if rating <= 2)
+    high_count = sum(1 for rating in ratings if rating >= 4)
+    signal.strength = {
+        "supporting_review_count": len(support_comments),
+        "evidence_count": len(signal.evidence),
+        "affected_products": len(affected_products),
+        "average_rating": round(mean(ratings), 2) if ratings else None,
+        "low_rating_count": low_count,
+        "high_rating_count": high_count,
+        "rating_skew": round(low_count / len(ratings), 3) if ratings else None,
+        "helpful_votes": sum(comment.helpful_vote or 0 for comment in support_comments),
+        "source_chunk_count": len(signal.source_chunks),
+    }
+
+
+def _combine_strength(left: dict, right: dict) -> dict:
+    return {
+        "supporting_review_count": max(
+            left.get("supporting_review_count", 0),
+            right.get("supporting_review_count", 0),
+        ),
+        "evidence_count": left.get("evidence_count", 0)
+        + right.get("evidence_count", 0),
+        "affected_products": max(
+            left.get("affected_products", 0),
+            right.get("affected_products", 0),
+        ),
+        "average_rating": left.get("average_rating") or right.get("average_rating"),
+        "low_rating_count": max(
+            left.get("low_rating_count", 0), right.get("low_rating_count", 0)
+        ),
+        "high_rating_count": max(
+            left.get("high_rating_count", 0), right.get("high_rating_count", 0)
+        ),
+        "rating_skew": left.get("rating_skew") or right.get("rating_skew"),
+        "helpful_votes": left.get("helpful_votes", 0) + right.get("helpful_votes", 0),
+        "source_chunk_count": max(
+            left.get("source_chunk_count", 0),
+            right.get("source_chunk_count", 0),
+        ),
+    }
+
+
+def _evidence_comments(
+    signal: CampaignSignal,
+    comments: list[CommunityComment],
+) -> list[CommunityComment]:
+    source_map = {comment.id: comment for comment in comments}
+    return [
+        source_map[item.source_record_id]
+        for item in signal.evidence
+        if item.source_record_id in source_map
+    ]
+
+
+def _signal_sort_key(signal: CampaignSignal) -> tuple:
+    strength = signal.strength or {}
+    return (
+        SEVERITY_RANK.get(signal.severity, 0),
+        strength.get("supporting_review_count", 0),
+        strength.get("affected_products", 0),
+        signal.confidence,
+        len(signal.evidence),
+    )
+
+
+def _signal_tokens(signal: CampaignSignal) -> set[str]:
+    text = f"{signal.title} {signal.summary}".lower()
+    words = re.findall(r"[a-z0-9]+", text)
+    stopwords = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "from",
+        "into",
+        "coffee",
+        "product",
+        "review",
+        "reviews",
+        "campaign",
+    }
+    return {word for word in words if len(word) > 3 and word not in stopwords}
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0
+    return len(left & right) / len(left | right)
+
+
+def _higher_severity(left: str, right: str) -> str:
+    return left if SEVERITY_RANK.get(left, 0) >= SEVERITY_RANK.get(right, 0) else right
 
 
 def _select_comments_for_llm(
@@ -581,6 +1043,7 @@ def _extract_comment_signals(
                 for hit in hits[:3]
             ],
         )
+        _apply_signal_strength(signal, hits)
         signals.append(signal)
 
     for term, hits in positive_hits.items():
@@ -603,6 +1066,7 @@ def _extract_comment_signals(
                 for hit in hits[:3]
             ],
         )
+        _apply_signal_strength(signal, hits)
         signals.append(signal)
 
     rating_buckets = Counter(
@@ -621,36 +1085,36 @@ def _extract_comment_signals(
             for comment in comments
             if comment.source_rating and comment.source_rating >= 4
         )
-        signals.append(
-            CampaignSignal(
-                campaign_id=campaign_id,
-                signal_type=SignalType.audience_tension,
-                title="Product love is split by expectation gaps",
-                summary=(
-                    "The review set contains both enthusiastic benefit language and "
-                    "low-rating objections, so campaign copy should set expectations "
-                    "plainly instead of overpromising."
+        tension = CampaignSignal(
+            campaign_id=campaign_id,
+            signal_type=SignalType.audience_tension,
+            title="Product love is split by expectation gaps",
+            summary=(
+                "The review set contains both enthusiastic benefit language and "
+                "low-rating objections, so campaign copy should set expectations "
+                "plainly instead of overpromising."
+            ),
+            confidence=0.78,
+            severity="medium",
+            recommended_action=(
+                "Pair creator praise with concrete usage details, especially "
+                "scent, texture, package handling, and value."
+            ),
+            evidence=[
+                EvidenceItem(
+                    source_record_id=low.id,
+                    quote=low.text[:160],
+                    reason="Low-rating evidence shows friction.",
                 ),
-                confidence=0.78,
-                severity="medium",
-                recommended_action=(
-                    "Pair creator praise with concrete usage details, especially "
-                    "scent, texture, package handling, and value."
+                EvidenceItem(
+                    source_record_id=high.id,
+                    quote=high.text[:160],
+                    reason="High-rating evidence shows usable message language.",
                 ),
-                evidence=[
-                    EvidenceItem(
-                        source_record_id=low.id,
-                        quote=low.text[:160],
-                        reason="Low-rating evidence shows friction.",
-                    ),
-                    EvidenceItem(
-                        source_record_id=high.id,
-                        quote=high.text[:160],
-                        reason="High-rating evidence shows usable message language.",
-                    ),
-                ],
-            )
+            ],
         )
+        _apply_signal_strength(tension, comments)
+        signals.append(tension)
 
     return signals[:8]
 
