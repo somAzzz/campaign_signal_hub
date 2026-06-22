@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
+    "build:pages": "tsc && VITE_DEMO_MODE=true vite build --base=/campaign_signal_hub/",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
